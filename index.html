@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Starbound Sprint</title>
+  <style>
+    *{box-sizing:border-box} html,body{margin:0;height:100%;overflow:hidden;background:#111827;font-family:monospace;color:#fff}
+    canvas{width:100vw;height:100vh;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+    #start,#pause,#finish{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;background:linear-gradient(#75d5ffbb,#183b70cc);z-index:2}
+    .panel{max-width:650px;padding:32px 42px;border:6px solid #fff;background:#173862;box-shadow:0 0 0 7px #11304f,9px 12px #07152a}
+    h1{font-size:clamp(28px,6vw,60px);margin:0 0 8px;color:#ffe45c;text-shadow:4px 4px #ba4535;letter-spacing:2px}.tag{color:#a9f1ff;font-size:16px;margin:0 0 26px}
+    .controls{display:grid;grid-template-columns:1fr 1fr;gap:9px;text-align:left;margin:20px 0 26px;color:#e8f7ff;font-size:15px}.key{color:#ffe45c}
+    button{font:700 18px monospace;padding:14px 27px;border:4px solid #fff;background:#e84a3e;color:#fff;box-shadow:4px 4px #74251f;cursor:pointer}button:hover{background:#ff6355}small{display:block;margin-top:20px;color:#9ed6e8}
+    #pause,#finish{display:none}.stats{color:#fff6b0;font-size:17px;line-height:1.8}
+  </style>
+</head>
+<body>
+  <canvas id="game" width="960" height="540"></canvas>
+  <section id="start"><div class="panel"><h1>STARBOUND SPRINT</h1><p class="tag">A classic 2D platform adventure</p><div class="controls"><span><b class="key">← → / A D</b> Move</span><span><b class="key">Space / W / ↑</b> Jump</span><span><b class="key">Shift / X</b> Dash</span><span><b class="key">P / Esc</b> Pause</span><span><b class="key">R</b> Restart level</span><span><b class="key">M</b> Toggle sound</span></div><p>Collect star shards, stomp critters, discover checkpoints, and reach the beacon. Five long worlds await — budget around <b>10–15 minutes</b> for your first run.</p><button id="play">START ADVENTURE</button><small>Tip: hold jump a little longer for a higher leap.</small></div></section>
+  <section id="pause"><div class="panel"><h1>PAUSED</h1><p>Take a breath, then get back to it.</p><button id="resume">RESUME</button><small>P or Esc also resumes</small></div></section>
+  <section id="finish"><div class="panel"><h1>YOU DID IT!</h1><p class="stats" id="finalStats"></p><button id="again">PLAY AGAIN</button></div></section>
+<script>
+(() => {
+  const c=document.querySelector('#game'),x=c.getContext('2d'); x.imageSmoothingEnabled=false;
+  const W=960,H=540, GRAV=1550, keys={}; let running=false,paused=false,muted=false,ac=null;
+  addEventListener('keydown',e=>{keys[e.code]=true;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();if((e.code==='KeyP'||e.code==='Escape')&&running)togglePause();if(e.code==='KeyR'&&running)loadLevel(levelNo);if(e.code==='KeyM')muted=!muted});
+  addEventListener('keyup',e=>keys[e.code]=false);
+  const K=(...a)=>a.some(k=>keys[k]);
+  function tone(f,d=.08,type='square',v=.045){if(muted)return;try{ac??=new AudioContext();let o=ac.createOscillator(),g=ac.createGain();o.type=type;o.frequency.value=f;g.gain.setValueAtTime(v,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);o.connect(g).connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch(e){}}
+  const palettes=[['#76d9ff','#b9efff','#6bc451','#2b7a38'],['#f79751','#ffd67c','#c95040','#7e2530'],['#563f91','#b499e6','#6aa7c9','#255a8c'],['#14364c','#76bd9d','#e2ecbd','#24704c'],['#7c5ca4','#e2b9ee','#f7d574','#b35d87']];
+  const names=['Meadow Mile','Sunset Foundry','Moonlit Caverns','Mossy Marsh','Skyline Summit'];
+  let levelNo=0,world,player,camera,last=0,elapsed=0,totalStars=0,deaths=0,notice='',noticeT=0,fps=60;
+  function rect(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
+  function makeLevel(n){let p=palettes[n], ground=[],plats=[],coins=[],enemies=[],goalX=40400,cp=[]; ground.push({x:-200,y:474,w:920,h:100});
+    // Long, varied terrain: deliberately paced around exploration and platforming.
+    for(let i=0;i<110;i++){let base=760+i*360, gap=(i%5===3?125:45), y=474-(i%4===1?55:0);ground.push({x:base+gap,y:y,w:315-gap,h:100});}
+    ground.push({x:40350,y:474,w:600,h:100});
+    for(let i=0;i<176;i++){let px=360+i*230+(i%3)*35, py=335-((i*47)%3)*62;plats.push({x:px,y:py,w:110+(i%3)*30,h:20}); if(i%2===0)coins.push({x:px+45,y:py-35}); if(i%5===0)coins.push({x:px+80,y:py-35});}
+    for(let i=0;i<94;i++){let ex=650+i*410, floor=ground.find(s=>ex>s.x+35&&ex<s.x+s.w-35)||ground[0];enemies.push({x:ex,y:floor.y-31,v:i%2?65:-65,w:30,h:31,alive:true});}
+    cp=[{x:6500,y:405},{x:18000,y:405},{x:31500,y:405}]; return {p,ground,plats,coins, enemies,cp,goalX,width:40950};}
+  function loadLevel(n){world=makeLevel(n);player={x:90,y:360,w:31,h:42,vx:0,vy:0,on:false,face:1,stars:0,checkpoint:0,inv:0};camera=0;notice=`WORLD ${n+1}: ${names[n]}`;noticeT=2.5;}
+  function start(){totalStars=0;deaths=0;elapsed=0;levelNo=0;paused=false;loadLevel(0);running=true;document.querySelector('#start').style.display='none';document.querySelector('#pause').style.display='none';document.querySelector('#finish').style.display='none';last=performance.now();requestAnimationFrame(loop);tone(523,.12);setTimeout(()=>tone(784,.15),130)}
+  document.querySelector('#play').onclick=start;document.querySelector('#again').onclick=start;document.querySelector('#resume').onclick=togglePause;
+  function togglePause(){paused=!paused;document.querySelector('#pause').style.display=paused?'flex':'none'; if(!paused){last=performance.now();requestAnimationFrame(loop)}}
+  function solids(){return [...world.ground,...world.plats]}
+  function respawn(){deaths++;player.x=player.checkpoint?world.cp[player.checkpoint-1].x:90;player.y=340;player.vx=player.vy=0;player.inv=1.5;notice='BACK TO THE CHECKPOINT';noticeT=1.5;tone(120,.2,'sawtooth')}
+  function update(dt){elapsed+=dt;noticeT-=dt;let p=player,dir=(K('ArrowRight','KeyD')?1:0)-(K('ArrowLeft','KeyA')?1:0);if(dir){p.vx+=dir*1700*dt;p.face=dir} else p.vx*=Math.pow(.001,dt);p.vx=Math.max(-300,Math.min(300,p.vx));
+    if(K('ShiftLeft','ShiftRight','KeyX')&&p.on&&Math.abs(p.vx)>80)p.vx=p.face*390;
+    if((K('Space','ArrowUp','KeyW'))&&p.on){p.vy=-570;p.on=false;tone(330,.08)} if(!K('Space','ArrowUp','KeyW')&&p.vy<-180)p.vy+=1100*dt;
+    p.vy+=GRAV*dt;p.x+=p.vx*dt; for(const s of solids())if(rect(p,s)){if(p.vx>0)p.x=s.x-p.w;else if(p.vx<0)p.x=s.x+s.w;p.vx=0}p.y+=p.vy*dt;p.on=false;for(const s of solids())if(rect(p,s)){if(p.vy>0){p.y=s.y-p.h;p.on=true}else if(p.vy<0)p.y=s.y+s.h;p.vy=0}if(p.y>620)respawn();p.inv-=dt;
+    world.coins=world.coins.filter(q=>{if(Math.hypot(p.x+p.w/2-q.x,p.y+p.h/2-q.y)<32){p.stars++;totalStars++;tone(880,.06);return false}return true});
+    for(const q of world.enemies)if(q.alive){q.x+=q.v*dt;let near=solids().some(s=>q.x+q.w>s.x&&q.x<s.x+s.w&&q.y+q.h>=s.y-3&&q.y+q.h<=s.y+7);if(!near)q.v*=-1;if(rect(p,q)){if(p.vy>90&&p.y+p.h-q.y<20){q.alive=false;p.vy=-380;tone(180,.1)}else if(p.inv<0)respawn()}}
+    world.cp.forEach((q,i)=>{if(p.x>q.x&&p.checkpoint<i+1){p.checkpoint=i+1;notice='CHECKPOINT ACTIVATED!';noticeT=1.8;tone(660,.15)}});if(p.x>world.goalX){if(levelNo<4){levelNo++;loadLevel(levelNo);tone(990,.2)}else end()};camera=Math.max(0,Math.min(world.width-W,p.x-W*.38));}
+  function end(){running=false;document.querySelector('#finalStats').innerHTML=`You restored the five beacons!<br>Time: ${Math.floor(elapsed/60)}:${String(Math.floor(elapsed%60)).padStart(2,'0')} &nbsp; · &nbsp; Star shards: ${totalStars}<br>Falls: ${deaths}`;document.querySelector('#finish').style.display='flex';tone(523,.15);setTimeout(()=>tone(659,.15),160);setTimeout(()=>tone(784,.25),320)}
+  function rr(X,Y,w,h,col){x.fillStyle=col;x.fillRect(Math.round(X-camera),Math.round(Y),w,h)}
+  function draw(){let p=world.p; x.fillStyle=p[0];x.fillRect(0,0,W,H); // hills/clouds
+    x.fillStyle=p[1];for(let i=-1;i<10;i++){let a=i*180-(camera*.18%180);x.fillRect(a,155+(i%2)*25,120,35);x.fillRect(a+25,125+(i%2)*25,65,35)}
+    x.fillStyle=p[2];for(let i=-1;i<8;i++){let a=i*270-(camera*.35%270);x.beginPath();x.arc(a+130,475,150,Math.PI,0);x.fill()} x.fillStyle=p[3];x.fillRect(0,465,W,75);
+    for(const s of world.ground){rr(s.x,s.y,s.w,s.h,'#76503b');rr(s.x,s.y,s.w,10,'#d7a85e')}for(const s of world.plats){rr(s.x,s.y,s.w,s.h,'#a65735');rr(s.x,s.y,s.w,5,'#ffe182')}
+    for(const q of world.coins){let Q=q.x-camera;x.fillStyle='#ffe54d';x.fillRect(Q-7,q.y-11,14,22);x.fillStyle='#fff3a4';x.fillRect(Q-3,q.y-8,5,16)}
+    for(const q of world.cp){let Q=q.x-camera;x.fillStyle='#ddd';x.fillRect(Q,q.y-70,5,70);x.fillStyle='#ffdb45';x.fillRect(Q+5,q.y-70,28,19)}
+    let gx=world.goalX-camera; x.fillStyle='#e9e9f1';x.fillRect(gx,265,7,210);x.fillStyle='#ffef60';x.fillRect(gx+7,266,50,36);x.fillStyle='#fff';x.fillRect(gx+20,276,23,10);
+    // Pixel-art critters: a little bounce, a proper face, and a readable silhouette.
+    for(const q of world.enemies)if(q.alive){let Q=q.x-camera,bob=Math.sin(elapsed*8+q.x)*2;
+      x.fillStyle='#18324a55';x.fillRect(Q+3,q.y+30,26,4);
+      x.fillStyle='#492342';x.fillRect(Q+3,q.y+8+bob,24,18);x.fillRect(Q+7,q.y+4+bob,16,25);
+      x.fillStyle='#a6405f';x.fillRect(Q+5,q.y+9+bob,20,15);x.fillRect(Q+9,q.y+5+bob,12,20);
+      x.fillStyle='#ed7791';x.fillRect(Q+8,q.y+10+bob,14,8);
+      x.fillStyle='#fff5d0';x.fillRect(Q+(q.v>0?18:8),q.y+12+bob,5,5);
+      x.fillStyle='#18223c';x.fillRect(Q+(q.v>0?20:9),q.y+13+bob,2,3);
+      x.fillStyle='#f5c24e';x.fillRect(Q+6,q.y+25+bob,7,5);x.fillRect(Q+18,q.y+25+bob,7,5);
+    }
+    // Hero: original star-runner with hair, scarf, boots, and a tiny run cycle.
+    let Q=player.x-camera, step=Math.abs(player.vx)>45&&player.on?Math.sin(elapsed*18)*3:0, blink=player.inv>0&&Math.floor(elapsed*12)%2===0;
+    if(!blink){
+      x.fillStyle='#18324a55';x.fillRect(Q+4,player.y+40,25,4);
+      x.fillStyle='#18223c';x.fillRect(Q+3,player.y+18,25,20);x.fillRect(Q+6,player.y+4,20,19);
+      x.fillStyle='#315ca8';x.fillRect(Q+6,player.y+23,19,15);x.fillRect(Q+4,player.y+35,10,6+step);x.fillRect(Q+20,player.y+35,10,6-step);
+      x.fillStyle='#74a9f8';x.fillRect(Q+9,player.y+24,13,10);
+      x.fillStyle='#f05b4d';x.fillRect(Q+1,player.y+17,9,8);x.fillRect(Q-3,player.y+20,8,5);
+      x.fillStyle='#4b2d36';x.fillRect(Q+6,player.y+4,20,9);x.fillRect(Q+3,player.y+8,7,11);
+      x.fillStyle='#ffd0a0';x.fillRect(Q+9,player.y+11,16,12);x.fillRect(Q+6,player.y+17,5,6);
+      x.fillStyle='#17233b';x.fillRect(Q+(player.face>0?20:12),player.y+15,3,4);
+      x.fillStyle='#fff';x.fillRect(Q+(player.face>0?21:13),player.y+15,1,1);
+      x.fillStyle='#f6c54b';x.fillRect(Q+13,player.y+28,5,5);
+      x.fillStyle='#273047';x.fillRect(Q+2,player.y+39+step,12,4);x.fillRect(Q+19,player.y+39-step,12,4);
+    }
+    x.fillStyle='#173862cc';x.fillRect(14,13,304,70);x.strokeStyle='#fff';x.strokeRect(14,13,304,70);x.fillStyle='#fff';x.font='bold 16px monospace';x.fillText(`WORLD ${levelNo+1}/5  ${names[levelNo]}`,26,34);x.fillStyle='#ffe45c';x.fillText(`✦ ${totalStars}    TIME ${Math.floor(elapsed/60)}:${String(Math.floor(elapsed%60)).padStart(2,'0')}`,26,55);x.fillStyle='#a9f1ff';x.fillText(`FPS ${Math.round(fps)}`,26,76);
+    if(noticeT>0){x.font='bold 25px monospace';x.textAlign='center';x.fillStyle='#173862';x.fillText(notice,W/2+2,98+2);x.fillStyle='#fff4a1';x.fillText(notice,W/2,98);x.textAlign='left'}
+  }
+  function loop(now){if(!running||paused)return;let dt=Math.min(.033,(now-last)/1000);last=now;fps+=((1/Math.max(dt,.001))-fps)*.08;update(dt);draw();requestAnimationFrame(loop)}
+  // Ambient title scene
+  world=makeLevel(0);player={x:120,y:360,w:31,h:42,face:1};camera=0;draw();
+})();
+</script></body></html>
